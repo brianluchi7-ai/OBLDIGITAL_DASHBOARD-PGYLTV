@@ -6,7 +6,7 @@ import plotly.express as px
 from conexion_mysql import crear_conexion
 
 # ======================================================
-# === OBL DIGITAL DASHBOARD — GENERAL LTV (Dark Gold) ===
+# === OBL DIGITAL DASHBOARD — GENERAL LTV (Dark Gold, + Filtro SOURCE)
 # ======================================================
 
 def cargar_datos():
@@ -14,7 +14,7 @@ def cargar_datos():
     try:
         conexion = crear_conexion()
         if conexion:
-            print("✅ Leyendo GENERAL_LTV_PGYCLEAN desde Railway MySQL...")
+            print("✅ Leyendo GENERAL_LTV_PGY_CLEAN desde Railway MySQL...")
             query = "SELECT * FROM GENERAL_LTV_PGY_CLEAN"
             df = pd.read_sql(query, conexion)
             conexion.close()
@@ -85,13 +85,13 @@ df["count_ftd"] = pd.to_numeric(df.get("count_ftd", 0), errors="coerce").fillna(
 df["general_ltv"] = pd.to_numeric(df.get("general_ltv", 0), errors="coerce").fillna(0.0)
 
 # === 5️⃣ Limpieza de texto ===
-for col in ["country", "affiliate"]:
+for col in ["country", "affiliate", "source"]:
     if col in df.columns:
         df[col] = df[col].astype(str).str.strip().str.title()
         df[col].replace({"Nan": None, "None": None, "": None}, inplace=True)
 
-# === 6️⃣ Eliminar duplicados exactos (clave: fecha + país + afiliado) ===
-df = df.drop_duplicates(subset=["date", "country", "affiliate"], keep="last")
+# === 6️⃣ Eliminar duplicados exactos ===
+df = df.drop_duplicates(subset=["date", "country", "affiliate", "source"], keep="last")
 
 fecha_min, fecha_max = df["date"].min(), df["date"].max()
 
@@ -110,7 +110,7 @@ app = dash.Dash(__name__)
 server = app.server
 app.title = "OBL Digital — GENERAL LTV Dashboard"
 
-# === 9️⃣ Layout ===
+# === 9️⃣ Layout (agregamos filtro de Source) ===
 app.layout = html.Div(
     style={
         "backgroundColor": "#0d0d0d",
@@ -140,7 +140,6 @@ app.layout = html.Div(
                         "textAlign": "center",
                     },
                     children=[
-                        # === Filtro de Fecha ===
                         html.H4("Date", style={"color": "#D4AF37"}),
                         dcc.DatePickerRange(
                             id="filtro-fecha",
@@ -150,8 +149,7 @@ app.layout = html.Div(
                             style={"marginBottom": "25px"},
                         ),
 
-                        # === Filtro de Affiliate (debajo del Date) ===
-                        html.H4("Affiliate", style={"color": "#D4AF37", "marginTop": "5px"}),
+                        html.H4("Affiliate", style={"color": "#D4AF37"}),
                         dcc.Dropdown(
                             sorted(df["affiliate"].dropna().unique()),
                             [],
@@ -160,8 +158,16 @@ app.layout = html.Div(
                             style={"marginBottom": "20px"},
                         ),
 
-                        # === Filtro de Country ===
-                        html.H4("Country", style={"color": "#D4AF37", "marginTop": "10px"}),
+                        html.H4("Source", style={"color": "#D4AF37"}),
+                        dcc.Dropdown(
+                            sorted(df["source"].dropna().unique()),
+                            [],
+                            multi=True,
+                            id="filtro-source",
+                            style={"marginBottom": "20px"},
+                        ),
+
+                        html.H4("Country", style={"color": "#D4AF37"}),
                         dcc.Dropdown(
                             sorted(df["country"].dropna().unique()),
                             [],
@@ -200,6 +206,7 @@ app.layout = html.Div(
                                 {"name": "DATE", "id": "date"},
                                 {"name": "COUNTRY", "id": "country"},
                                 {"name": "AFFILIATE", "id": "affiliate"},
+                                {"name": "SOURCE", "id": "source"},
                                 {"name": "TOTAL AMOUNT", "id": "usd_total"},
                                 {"name": "FTD'S", "id": "count_ftd"},
                                 {"name": "GENERAL LTV", "id": "general_ltv"},
@@ -216,7 +223,7 @@ app.layout = html.Div(
     ],
 )
 
-# === 🔟 Callback ===
+# === 🔟 Callback (se agrega parámetro filtro-source) ===
 @app.callback(
     [
         Output("indicador-ftds", "children"),
@@ -231,24 +238,26 @@ app.layout = html.Div(
         Input("filtro-fecha", "start_date"),
         Input("filtro-fecha", "end_date"),
         Input("filtro-affiliate", "value"),
+        Input("filtro-source", "value"),
         Input("filtro-country", "value"),
     ],
 )
-def actualizar_dashboard(start, end, affiliates, countries):
+def actualizar_dashboard(start, end, affiliates, sources, countries):
     df_filtrado = df.copy()
 
-    # === Filtrar ===
     if start and end:
         start_dt, end_dt = pd.to_datetime(start), pd.to_datetime(end)
         df_filtrado = df_filtrado[(df_filtrado["date"] >= start_dt) & (df_filtrado["date"] <= end_dt)]
     if affiliates:
         df_filtrado = df_filtrado[df_filtrado["affiliate"].isin(affiliates)]
+    if sources:
+        df_filtrado = df_filtrado[df_filtrado["source"].isin(sources)]
     if countries:
         df_filtrado = df_filtrado[df_filtrado["country"].isin(countries)]
 
-    # === Agrupar por fecha, país, afiliado ===
+    # === Agrupar por fecha, país, afiliado y source ===
     df_agregado = (
-        df_filtrado.groupby(["date", "country", "affiliate"], as_index=False)
+        df_filtrado.groupby(["date", "country", "affiliate", "source"], as_index=False)
         .agg({"usd_total": "sum", "count_ftd": "sum"})
     )
     df_agregado["general_ltv"] = df_agregado.apply(
@@ -287,19 +296,16 @@ def actualizar_dashboard(start, end, affiliates, countries):
     # === Gráficos ===
     df_aff = df_agregado.groupby("affiliate", as_index=False).agg({"usd_total": "sum", "count_ftd": "sum"})
     df_aff["general_ltv"] = df_aff.apply(lambda r: r["usd_total"] / r["count_ftd"] if r["count_ftd"] > 0 else 0, axis=1)
-
     fig_affiliate = px.pie(df_aff, names="affiliate", values="general_ltv",
                            title="GENERAL LTV by Affiliate", color_discrete_sequence=px.colors.sequential.YlOrBr)
 
     df_cty = df_agregado.groupby("country", as_index=False).agg({"usd_total": "sum", "count_ftd": "sum"})
     df_cty["general_ltv"] = df_cty.apply(lambda r: r["usd_total"] / r["count_ftd"] if r["count_ftd"] > 0 else 0, axis=1)
-
     fig_country = px.pie(df_cty, names="country", values="general_ltv",
                          title="GENERAL LTV by Country", color_discrete_sequence=px.colors.sequential.YlOrBr)
 
     df_bar = df_agregado.groupby(["country", "affiliate"], as_index=False).agg({"usd_total": "sum", "count_ftd": "sum"})
     df_bar["general_ltv"] = df_bar.apply(lambda r: r["usd_total"] / r["count_ftd"] if r["count_ftd"] > 0 else 0, axis=1)
-
     fig_bar = px.bar(df_bar, x="country", y="general_ltv", color="affiliate",
                      title="GENERAL LTV by Country and Affiliate", barmode="group",
                      color_discrete_sequence=px.colors.sequential.YlOrBr)
@@ -318,3 +324,4 @@ def actualizar_dashboard(start, end, affiliates, countries):
 
 if __name__ == "__main__":
     app.run(debug=True, port=8053)
+
