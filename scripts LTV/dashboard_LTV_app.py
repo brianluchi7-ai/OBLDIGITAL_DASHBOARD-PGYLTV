@@ -322,7 +322,51 @@ def actualizar_dashboard(start, end, affiliates, sources, countries):
     return indicador_ftds, indicador_amount, indicador_ltv, fig_affiliate, fig_country, fig_bar, tabla_data
 
 
+# === 9️⃣ Captura PDF/PPT desde iframe ===
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+<head>
+  {%metas%}
+  <title>OBL Digital — Dashboard FTD</title>
+  {%favicon%}
+  {%css%}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+  {%app_entry%}
+  <footer>
+    {%config%}
+    {%scripts%}
+    {%renderer%}
+  </footer>
+
+  <script>
+    window.addEventListener("message", async (event) => {
+      if (!event.data || event.data.action !== "capture_dashboard") return;
+
+      try {
+        const canvas = await html2canvas(document.body, { useCORS: true, scale: 2, backgroundColor: "#0d0d0d" });
+        const imgData = canvas.toDataURL("image/png");
+
+        window.parent.postMessage({
+          action: "capture_image",
+          img: imgData,
+          filetype: event.data.type
+        }, "*");
+      } catch (err) {
+        console.error("Error al capturar dashboard:", err);
+        window.parent.postMessage({ action: "capture_done" }, "*");
+      }
+    });
+  </script>
+</body>
+</html>
+'''
+
+
 if __name__ == "__main__":
     app.run_server(debug=True, port=8053)
+
 
 
