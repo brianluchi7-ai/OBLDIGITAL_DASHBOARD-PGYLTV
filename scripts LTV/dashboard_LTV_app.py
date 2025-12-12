@@ -97,12 +97,12 @@ fecha_min, fecha_max = df["date"].min(), df["date"].max()
 
 # === 7️⃣ Formato K/M ===
 def formato_km(valor):
-    if valor >= 1_000_000:
-        return f"{valor/1_000_000:.2f}M"
-    elif valor >= 1_000:
-        return f"{valor/1_000:.1f}K"
-    else:
-        return f"{valor:.0f}"
+    """Mostrar los montos completos con separadores de miles y dos decimales."""
+    try:
+        return f"{valor:,.2f}"
+    except:
+        return "0.00"
+
 
 
 # === 8️⃣ Inicializar app ===
@@ -367,6 +367,7 @@ app.index_string = '''
 
 if __name__ == "__main__":
     app.run_server(debug=True, port=8053)
+
 
 
 
